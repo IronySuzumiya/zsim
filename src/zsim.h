@@ -33,6 +33,9 @@
 #include "locks.h"
 #include "pad.h"
 
+#include "MQSim/wrapper/graph.hh"
+#include "MQSim/wrapper/ssd_wrapper.hh"
+
 class Core;
 class Scheduler;
 class AggregateStat;
@@ -183,6 +186,11 @@ struct GlobSimInfo {
     TraceDriver* traceDriver;
 };
 
+// nfp 2023-6-8
+extern GraphUtil::Graph* graph;
+extern FlashGNN::Memory::MQSimWrapper* ssd;
+extern uint64_t event_firetime;
+extern bool in_roi;
 
 //Process-wide global variables, defined in zsim.cpp
 extern Core* cores[MAX_THREADS]; //tid->core array

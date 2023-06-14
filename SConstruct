@@ -68,9 +68,17 @@ def buildSim(cppFlags, dir, type, pgo=None):
         xedPath = joinpath(PINPATH, "extras/" + xedName + "-intel64/include")
         assert os.path.exists(xedPath)
 
+    # nfp 2023-6-2
+    #env.SConscript("dep/MQSim/SConscript")
+
+    #mqsimInclDir = joinpath(ROOT, "dep/MQSim/src")
+
     env["CPPPATH"] = [xedPath,
             pinInclDir, joinpath(pinInclDir, "gen"),
             joinpath(PINPATH, "extras/components/include"), joinpath("/usr/include/hdf5/serial")]
+    
+    #env["MQSIMLIBPATH"] = [joinpath(ROOT, "dep/MQSim/lib")]
+    #env["MQSIMLIBS"] = ["mqsim"]
 
     # Perform trace logging?
     ##env["CPPFLAGS"] += " -D_LOG_TRACE_=1"

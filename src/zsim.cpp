@@ -63,6 +63,12 @@
 
 //#include <signal.h> //can't include this, conflicts with PIN's
 
+// nfp 2023-6-7
+GraphUtil::Graph* graph;
+FlashGNN::Memory::MQSimWrapper* ssd;
+uint64_t event_firetime;
+bool in_roi;
+
 /* Command-line switches (used to pass info from harness that cannot be passed through the config file, most config is file-based) */
 
 KNOB<INT32> KnobProcIdx(KNOB_MODE_WRITEONCE, "pintool",
@@ -145,6 +151,8 @@ VOID SimEnd();
 
 VOID HandleMagicOp(THREADID tid, ADDRINT op);
 
+VOID SendSSDRequest(THREADID tid, ADDRINT op);
+
 VOID FakeCPUIDPre(THREADID tid, REG eax, REG ecx);
 VOID FakeCPUIDPost(THREADID tid, ADDRINT* eax, ADDRINT* ebx, ADDRINT* ecx, ADDRINT* edx); //REG* eax, REG* ebx, REG* ecx, REG* edx);
 
@@ -176,6 +184,19 @@ VOID PIN_FAST_ANALYSIS_CALL IndirectStoreSingle(THREADID tid, ADDRINT addr) {
 
 VOID PIN_FAST_ANALYSIS_CALL IndirectBasicBlock(THREADID tid, ADDRINT bblAddr, BblInfo* bblInfo) {
     fPtrs[tid].bblPtr(tid, bblAddr, bblInfo);
+    
+    /*uint64_t cur_ssd_cycle = zinfo->globPhaseCycles / zinfo->freqMHz * 1000;
+    while(ssd->get_next_event_firetime() < cur_ssd_cycle) {
+        std::cout << "next event firetime: " << ssd->get_next_event_firetime() << std::endl;
+        ssd->skip_to_next_event();
+        std::cout << "skip to next event" << std::endl;
+    }
+    if(!ssd->is_event_tree_empty()) {
+        if(ssd->get_next_event_firetime() > event_firetime) {
+            event_firetime = ssd->get_next_event_firetime();
+            std::cout << "next event firetime: " << event_firetime << std::endl;
+        }
+    }*/
 }
 
 VOID PIN_FAST_ANALYSIS_CALL IndirectRecordBranch(THREADID tid, ADDRINT branchPc, BOOL taken, ADDRINT takenNpc, ADDRINT notTakenNpc) {
@@ -585,6 +606,12 @@ VOID Instruction(INS ins) {
        INS_InsertCall(ins, IPOINT_BEFORE, (AFUNPTR) FakeCPUIDPre, IARG_THREAD_ID, IARG_REG_VALUE, REG_EAX, IARG_REG_VALUE, REG_ECX, IARG_END);
        INS_InsertCall(ins, IPOINT_AFTER, (AFUNPTR) FakeCPUIDPost, IARG_THREAD_ID, IARG_REG_REFERENCE, REG_EAX,
                IARG_REG_REFERENCE, REG_EBX, IARG_REG_REFERENCE, REG_ECX, IARG_REG_REFERENCE, REG_EDX, IARG_END);
+    }
+
+    // nfp 2023-6-2
+    if (INS_Opcode(ins) == XED_ICLASS_CLFLUSH){
+        INS_InsertCall(ins, IPOINT_BEFORE, (AFUNPTR) SendSSDRequest, IARG_THREAD_ID, IARG_MEMORYREAD_EA, IARG_END);
+        INS_Delete(ins);
     }
 
     if (INS_IsRDTSC(ins)) {
@@ -1141,6 +1168,7 @@ VOID HandleMagicOp(THREADID tid, ADDRINT op) {
             if (!zinfo->ignoreHooks) {
                 //TODO: Test whether this is thread-safe
                 futex_lock(&zinfo->ffLock);
+                in_roi = true;
                 if (procTreeNode->isInFastForward()) {
                     info("ROI_BEGIN, exiting fast-forward");
                     ExitFastForward();
@@ -1154,6 +1182,7 @@ VOID HandleMagicOp(THREADID tid, ADDRINT op) {
             if (!zinfo->ignoreHooks) {
                 //TODO: Test whether this is thread-safe
                 futex_lock(&zinfo->ffLock);
+                in_roi = false;
                 if (procTreeNode->getSyncedFastForward()) {
                     warn("Ignoring ROI_END magic op on synced FF to avoid deadlock");
                 } else if (!procTreeNode->isInFastForward()) {
@@ -1201,6 +1230,43 @@ VOID HandleMagicOp(THREADID tid, ADDRINT op) {
             return;
         default:
             panic("Thread %d issued unknown magic op %ld!", tid, op);
+    }
+}
+
+// nfp 2023-6-2
+VOID SendSSDRequest(THREADID tid, ADDRINT op) {
+    FlashGNN::Memory::SSDRequest* req = (FlashGNN::Memory::SSDRequest*)op;
+    req->thread_id = tid;
+    req->issued_cycle = zinfo->globPhaseCycles / zinfo->freqMHz * 1000;
+
+    std::cout << "type: " << static_cast<uint32_t>(req->type) << std::endl;
+    for(const auto& addr : req->addrs) {
+        std::cout << "addr: " << addr << std::endl;
+    }
+    std::cout << "bytes: " << req->bytes << std::endl;
+    std::cout << "thread_id: " << req->thread_id << std::endl;
+    std::cout << "issued_cycle: " << req->issued_cycle << std::endl;
+
+    while(ssd->get_next_event_firetime() < req->issued_cycle) {
+        std::cout << "skip to next event: " << ssd->get_next_event_firetime() << std::endl;
+        ssd->skip_to_next_event();
+    }
+    if(ssd->get_cycle() < req->issued_cycle) {
+        std::cout << "set ssd cycle to " << req->issued_cycle - 1 << std::endl;
+        ssd->set_cycle(req->issued_cycle - 1);
+        ssd->tick();
+        std::cout << "ssd ticks, now ssd cycle: " << ssd->get_cycle() << std::endl;
+    } else {
+        std::cerr << "fatal error: request issued cycle (" << req->issued_cycle << ") < current ssd cycle (" << ssd->get_cycle() << ")" << std::endl;
+    }
+
+    ssd->send_req(req);
+
+    if(!ssd->is_event_tree_empty()) {
+        if(ssd->get_next_event_firetime() > event_firetime) {
+            event_firetime = ssd->get_next_event_firetime();
+            std::cout << "next event firetime: " << event_firetime << std::endl;
+        }
     }
 }
 
@@ -1429,6 +1495,14 @@ static EXCEPT_HANDLING_RESULT InternalExceptionHandler(THREADID tid, EXCEPTION_I
 /* ===================================================================== */
 
 int main(int argc, char *argv[]) {
+    // nfp 2023-6-7
+    std::string pwd = get_current_dir_name();
+    graph = new GraphUtil::Graph();
+    graph->import("/home/nfp/FlashGNN/data/glist_n64k_d16k_products", 16384);
+    ssd = new FlashGNN::Memory::MQSimWrapper(graph);
+
+    std::cout << "graph and mqsim initialized" << std::endl;
+
     PIN_InitSymbols();
     if (PIN_Init(argc, argv)) return Usage();
 
@@ -1567,6 +1641,10 @@ int main(int argc, char *argv[]) {
         // Never returns
         PIN_StartProgram();
     }
+
+    delete ssd;
+    delete graph;
+
     return 0;
 }
 

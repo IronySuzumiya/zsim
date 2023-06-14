@@ -116,6 +116,19 @@ void ProcessTreeNode::exitFastForward() {
 }
 
 void ProcessTreeNode::heartbeat() {
+    uint64_t cur_ssd_cycle = zinfo->globPhaseCycles / zinfo->freqMHz * 1000;
+    while(ssd->get_next_event_firetime() < cur_ssd_cycle) {
+        std::cout << "next event firetime: " << ssd->get_next_event_firetime() << std::endl;
+        ssd->skip_to_next_event();
+        std::cout << "skip to next event" << std::endl;
+    }
+    if(!ssd->is_event_tree_empty()) {
+        if(ssd->get_next_event_firetime() > event_firetime) {
+            event_firetime = ssd->get_next_event_firetime();
+            std::cout << "next event firetime: " << event_firetime << std::endl;
+        }
+    }
+
     uint64_t curBeats = __sync_add_and_fetch(&heartbeats, 1);
     zinfo->profHeartbeats->atomicInc(procIdx);
     //info("Heartbeat, total %ld", curBeats);

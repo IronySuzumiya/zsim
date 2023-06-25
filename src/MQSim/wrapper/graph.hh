@@ -7,8 +7,12 @@
 #include <cstdint>
 #include <cmath>
 #include <vector>
-#include <string>
+#include <list>
+#include <set>
+#include <unordered_set>
+#include <map>
 #include <unordered_map>
+#include <string>
 #include <dirent.h>
 #include <unistd.h>
 #include <sys/stat.h>
@@ -33,14 +37,6 @@ typedef uint32_t bid_t;
 
 class Graph {
 public:
-  struct Edge {
-    vid_t dst;
-  };
-  
-  struct Vertex {
-    std::vector<Edge> edges;
-  };
-
   struct GlobalMetadata {
     bool weighted;
     vid_t nverts;
@@ -82,7 +78,6 @@ protected:
   GlobalMetadata global_metadata;
   std::vector<Block> blocks;
   std::unordered_map<vid_t, DenseVertex::Metadata> dverts;
-  std::vector<Graph::Vertex> vertices;
 
   void read_header_file();
 
@@ -99,9 +94,6 @@ public:
   bool is_dvert(vid_t vid) const { return dverts.find(vid) != dverts.end(); }
   bool is_vert_in_block(vid_t vid, bid_t bid) const { return vid >= blocks.at(bid).metadata.vlo && vid < blocks.at(bid).metadata.vup; }
   bid_t binary_search_block(vid_t vid) const;
-
-  eid_t get_vert_odg(vid_t vid) const { return vertices.at(vid).edges.size(); }
-  vid_t get_vert_edge_dst(vid_t vid, eid_t eid) const { return vertices.at(vid).edges.at(eid).dst; }
 };
 
 };

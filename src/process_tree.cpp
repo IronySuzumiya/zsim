@@ -117,14 +117,14 @@ void ProcessTreeNode::exitFastForward() {
 
 void ProcessTreeNode::heartbeat() {
     uint64_t cur_ssd_cycle = zinfo->globPhaseCycles / zinfo->freqMHz * 1000;
-    while(ssd->get_next_event_firetime() < cur_ssd_cycle) {
-        std::cout << "next event firetime: " << ssd->get_next_event_firetime() << std::endl;
-        ssd->skip_to_next_event();
+    while(data_manager->get_next_event_firetime() < cur_ssd_cycle) {
+        std::cout << "next event firetime: " << data_manager->get_next_event_firetime() << std::endl;
+        data_manager->skip_to_next_event();
         std::cout << "skip to next event" << std::endl;
     }
-    if(!ssd->is_event_tree_empty()) {
-        if(ssd->get_next_event_firetime() > event_firetime) {
-            event_firetime = ssd->get_next_event_firetime();
+    if(data_manager->busy()) {
+        if(data_manager->get_next_event_firetime() > event_firetime && data_manager->get_next_event_firetime() < UINT64_MAX) {
+            event_firetime = data_manager->get_next_event_firetime();
             std::cout << "next event firetime: " << event_firetime << std::endl;
         }
     }

@@ -67,53 +67,12 @@ void Graph::import(const std::string& graph_path, uint32_t block_size) {
   global_metadata.voffset_size = std::ceil(std::log2(block_size / sizeof(vid_t)) / 8);
   global_metadata.block_size = block_size;
   read_header_file();
-
-  vertices.resize(global_metadata.nverts);
-
-  for(bid_t bid = 0; bid < global_metadata.nblocks; ++bid) {
-    std::fstream block_v_file;
-    std::fstream block_e_file;
-    
-    vid_t src = blocks.at(bid).metadata.vlo, dst = 0;
-    uint32_t ebegin = 0, eend = 0;
-    block_v_file.open(this->graph_path + "/blocks/block" + std::to_string(bid) + "_v.bin", std::ios::in | std::ios::binary);
-    block_e_file.open(this->graph_path + "/blocks/block" + std::to_string(bid) + "_e.bin", std::ios::in | std::ios::binary);
-
-    if(blocks.at(bid).metadata.dense) {
-      while(
-        block_e_file.read((char*)&dst, sizeof(vid_t))
-      ) {
-        vertices.at(src).edges.push_back(Graph::Edge { dst });
-      }
-    } else {
-      block_v_file.read((char*)&ebegin, global_metadata.voffset_size);
-      while(block_v_file.read((char*)&eend, global_metadata.voffset_size)) {
-        uint32_t out_degree = eend - ebegin;
-        for(uint32_t i = 0; i < out_degree; ++i) {
-          block_e_file.read((char*)&dst, sizeof(vid_t));
-          vertices.at(src).edges.push_back(Graph::Edge{ dst });
-        }
-        ebegin = eend;
-        ++src;
-      }
-    }
-
-    block_v_file.close();
-    block_e_file.close();
-  }
-
-  for(auto& v : vertices) {
-    // since there is no edge would be added in anymore, shrink capacity to save DRAM footprint
-    v.edges.shrink_to_fit();
-  }
 }
 
 bid_t Graph::binary_search_block(vid_t vid) const {
   auto it = std::upper_bound(blocks.cbegin(), blocks.cend(), vid,
     [](const vid_t& val, const Block& block) { return val < block.metadata.vup; });
   assert(it != blocks.cend());
-
-  //assert(vid >= it->metadata.vlo && vid < it->metadata.vup);
   
   return it - blocks.cbegin();
 }

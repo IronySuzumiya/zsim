@@ -5,59 +5,43 @@
 #include <unistd.h>
 #include "zsim_hooks.h"
 
-std::map<pthread_t, bool> threads_finished;
+bool edge_list_req_finished = false;
+bool node_feature_req_finished = false;
 
 void *heartbeat(void *) {
-  while(true) {
-    bool all_finished = true;
-    for(const auto& pair : threads_finished) {
-      if(!pair.second) {
-        all_finished = false;
-        break;
-      }
-    }
-    if(all_finished) {
-      printf("all threads finished\n");
-      break;
-    }
+  while(!edge_list_req_finished || !node_feature_req_finished) {
     zsim_heartbeat();
     usleep(1);
   }
   return NULL;
 }
 
-void *send_ssd_request(void *) {
-  SSDRequest req {
-    .type = SSDRequestType::READ,
-    .addrs = {
-      {0, 0, 0, 0, 0, 4},
-      {0, 0, 0, 1, 0, 4},
-      {0, 0, 0, 2, 0, 4},
-      {0, 0, 0, 3, 0, 4},
-    },
-    .bytes = 4096,
-    .callback = []() { printf("callback\n"); },
-  };
-  mqsim_read_flash(&req);
-  while(!req.finished) {
-    usleep(10);
-  }
-  threads_finished[pthread_self()] = true;
-  return NULL;
-}
-
 int main(int argc, char* argv[]) {
   pthread_t heartbeat_tid;
-  pthread_t send_ssd_request_tid;
-
-  zsim_roi_begin();
-
-  zsim_heartbeat();
 
   pthread_create(&heartbeat_tid, NULL, heartbeat, NULL);
 
-  pthread_create(&send_ssd_request_tid, NULL, send_ssd_request, NULL);
-  threads_finished.insert(std::make_pair(send_ssd_request_tid, false));
+  zsim_roi_begin();
+
+  DataManagerRequest edge_list_req {
+    .type = DataManagerRequestType::EDGE_LIST,
+    .vid = 233,
+    .callback = []() {
+      edge_list_req_finished = true;
+      printf("node 233 edge list loaded\n");
+    }
+  };
+  send_data_manager_request(&edge_list_req);
+  usleep(1);
+  DataManagerRequest node_feature_req {
+    .type = DataManagerRequestType::NODE_FEATURE,
+    .vid = 2333,
+    .callback = []() {
+      node_feature_req_finished = true;
+      printf("node 2333 input feature loaded\n");
+    }
+  };
+  send_data_manager_request(&node_feature_req);
 
   pthread_join(heartbeat_tid, NULL);
 

@@ -72,15 +72,15 @@ void MQSimWrapper::channel_idle_callback(uint32_t chanid) {
   }*/
 }
 
-void MQSimWrapper::req_callback(SSDRequest* req) {
-  req->finished = true;
-  req->callback();
-  uint32_t chanid = req->addrs.front().channel;
-  uint32_t chipid = req->addrs.front().chip;
-  uint32_t bytes = req->bytes;
-  uint32_t nplanes = req->addrs.size();
+/*void MQSimWrapper::handle_req_flash_callback(SSDRequest* req) {
+  //req.finished = true;
+  req.callback();
+  uint32_t chanid = req.addrs.front().channel;
+  uint32_t chipid = req.addrs.front().chip;
+  uint32_t bytes = req.bytes;
+  uint32_t nplanes = req.addrs.size();
   auto&& chip_stats = _channels_epoch_stats.at(chanid).chips_stats.at(chipid);
-  switch(req->type) {
+  switch(req.type) {
     case SSDRequestType::READ:
       ++chip_stats.read_times;
       chip_stats.read_traffic += bytes * nplanes;
@@ -92,28 +92,19 @@ void MQSimWrapper::req_callback(SSDRequest* req) {
     default:
       assert(false);
   }
-}
+}*/
 
-void MQSimWrapper::handle_req(SSDRequest* req, bool local) {
-  for(const auto& addr : req->addrs) {
-    if(!check_addr(addr)) {
-      assert(false);
-      return;
-    }
-  }
-  if(req->bytes == 0) {
-    req->callback();
-    return;
-  }
-
+void MQSimWrapper::handle_req_flash(const SSDRequest& req) {
   auto request = new SSD_Components::User_Request;
   request->Stream_id = 0;
   request->Priority_class = IO_Flow_Priority_Class::Priority::HIGH;
   request->STAT_InitiationTime = Simulator->Time();
-  switch(req->type) {
+  switch(req.type) {
+    case SSDRequestType::READ_LOCAL:
     case SSDRequestType::READ:
       request->Type = SSD_Components::UserRequestType::READ;
       break;
+    case SSDRequestType::WRITE_LOCAL:
     case SSDRequestType::WRITE:
       request->Type = SSD_Components::UserRequestType::WRITE;
       break;
@@ -121,21 +112,22 @@ void MQSimWrapper::handle_req(SSDRequest* req, bool local) {
       assert(false);
   }
   request->Start_LBA = 0; // not used
-  request->SizeInSectors = (req->bytes - 1) / SECTOR_SIZE_IN_BYTE + 1;
-  request->Size_in_byte = req->bytes;
+  request->SizeInSectors = (req.bytes - 1) / SECTOR_SIZE_IN_BYTE + 1;
+  request->Size_in_byte = req.bytes;
 
-  uint32_t chanid = req->addrs.front().channel;
+  uint32_t chanid = req.addrs.front().channel;
   request->channel_busy_callback = std::bind(&MQSimWrapper::channel_busy_callback, this, chanid);
   request->channel_idle_callback = std::bind(&MQSimWrapper::channel_idle_callback, this, chanid);
-  request->finish_callback = std::bind(&MQSimWrapper::req_callback, this, req);
-  request->local = local;
+  request->finish_callback = req.callback;//std::bind(&MQSimWrapper::handle_req_callback, this, req);
+  request->local = req.type == SSDRequestType::READ_LOCAL || req.type == SSDRequestType::WRITE_LOCAL;
 
-  for(uint32_t pagecnt = 0; pagecnt < (req->bytes - 1) / get_page_capacity() + 1; ++pagecnt) {
-    uint32_t size_in_bytes = std::min(get_page_capacity(), req->bytes - pagecnt * get_page_capacity());
+  for(uint32_t pagecnt = 0; pagecnt < (req.bytes - 1) / get_page_capacity() + 1; ++pagecnt) {
+    uint32_t size_in_bytes = std::min(get_page_capacity(), req.bytes - pagecnt * get_page_capacity());
     uint64_t access_status_bitmap = ~(~0x0UL << ((size_in_bytes - 1) / SECTOR_SIZE_IN_BYTE + 1));
-    for(auto& addr : req->addrs) {
+    for(auto& addr : req.addrs) {
       SSD_Components::NVM_Transaction_Flash* trans;
-      switch(req->type) {
+      switch(req.type) {
+        case SSDRequestType::READ_LOCAL:
         case SSDRequestType::READ:
           trans = new SSD_Components::NVM_Transaction_Flash_RD(
             SSD_Components::Transaction_Source_Type::USERIO, 0,
@@ -143,6 +135,7 @@ void MQSimWrapper::handle_req(SSDRequest* req, bool local) {
             request, IO_Flow_Priority_Class::Priority::HIGH, 0, access_status_bitmap, CurrentTimeStamp
           );
           break;
+        case SSDRequestType::WRITE_LOCAL:
         case SSDRequestType::WRITE:
           trans = new SSD_Components::NVM_Transaction_Flash_WR(
             SSD_Components::Transaction_Source_Type::USERIO, 0,
@@ -175,7 +168,7 @@ void MQSimWrapper::handle_req(SSDRequest* req, bool local) {
       auto&& trans_flash = (SSD_Components::NVM_Transaction_Flash*)trans;
       assert(trans_flash->Physical_address_determined);
       tsu->Submit_transaction(trans_flash);
-      if(req->type == SSDRequestType::WRITE) {
+      if(req.type == SSDRequestType::WRITE_LOCAL || req.type == SSDRequestType::WRITE) {
         auto&& trans_flash_wr = (SSD_Components::NVM_Transaction_Flash_WR*)trans_flash;
         if(trans_flash_wr->RelatedRead != nullptr) {
           tsu->Submit_transaction(trans_flash_wr->RelatedRead);
@@ -183,6 +176,58 @@ void MQSimWrapper::handle_req(SSDRequest* req, bool local) {
       }
     }
     tsu->Schedule();
+  }
+}
+
+void MQSimWrapper::handle_req_channel(const SSDRequest& req) {
+  uint32_t chanid = req.addrs.front().channel;
+  auto&& chan = _channels.at(chanid);
+  TransReq trans_req {
+    .bytes = req.bytes,
+    .bytes_to_trans = static_cast<float>(req.bytes),
+    .board_to_chip = req.type == SSDRequestType::PUSH,
+    .callback = req.callback
+  };
+  chan.reqs.push(trans_req);
+  switch (req.type)
+  {
+    case SSDRequestType::PULL:
+      chan.chip_to_board_bytes += req.bytes;
+      break;
+    case SSDRequestType::PUSH:
+      chan.board_to_chip_bytes += req.bytes;
+      break;
+    default:
+      assert(false);
+      break;
+  }
+}
+
+void MQSimWrapper::handle_req(const SSDRequest& req) {
+  for(const auto& addr : req.addrs) {
+    if(!check_addr(addr)) {
+      assert(false);
+      return;
+    }
+  }
+  if(req.bytes == 0) {
+    req.callback();
+  } else {
+    switch(req.type) {
+      case SSDRequestType::READ_LOCAL:
+      case SSDRequestType::READ:
+      case SSDRequestType::WRITE_LOCAL:
+      case SSDRequestType::WRITE:
+        handle_req_flash(req);
+        break;
+      case SSDRequestType::PULL:
+      case SSDRequestType::PUSH:
+        handle_req_channel(req);
+        break;
+      default:
+        assert(false);
+        break;
+    }
   }
 }
 
@@ -217,7 +262,7 @@ MQSimWrapper::MQSimWrapper(const GraphUtil::Graph* graph)
   Simulator->clear_dummy_event();
 }
 
-void MQSimWrapper::send_req(SSDRequest* req) {
+void MQSimWrapper::send_req(const SSDRequest& req) {
   handle_req(req);
 }
 

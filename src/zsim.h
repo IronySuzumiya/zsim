@@ -35,6 +35,7 @@
 
 #include "MQSim/wrapper/graph.hh"
 #include "MQSim/wrapper/ssd_wrapper.hh"
+#include "MQSim/wrapper/data_manager.hh"
 
 class Core;
 class Scheduler;
@@ -187,8 +188,9 @@ struct GlobSimInfo {
 };
 
 // nfp 2023-6-8
-extern GraphUtil::Graph* graph;
-extern FlashGNN::Memory::MQSimWrapper* ssd;
+//extern GraphUtil::Graph* graph;
+//extern FlashGNN::Memory::MQSimWrapper* ssd;
+extern FlashGNN::DataManager* data_manager;
 extern uint64_t event_firetime;
 extern bool in_roi;
 

@@ -50,44 +50,22 @@ static inline void zsim_heartbeat() {
 static inline void zsim_work_begin() { zsim_magic_op(ZSIM_MAGIC_OP_WORK_BEGIN); }
 static inline void zsim_work_end() { zsim_magic_op(ZSIM_MAGIC_OP_WORK_END); }
 
-// nfp 2023-6-7
-struct FlashAddress {
-  uint32_t channel;
-  uint32_t chip;
-  uint32_t die;
-  uint32_t plane;
-  uint32_t block;
-  uint32_t page;
-
-  std::string to_string() const {
-    return fmt::format("{}, {}, {}, {}, {}, {}", channel, chip, die, plane, block, page);
-  }
-
-  template<typename OStream>
-  friend OStream &operator<<(OStream &os, const FlashAddress& addr) {
-    return os << addr.channel << ", " << addr.chip << ", " << addr.die << ", " << addr.plane << ", " << addr.block << ", " << addr.page;
-  }
+// nfp 2023-6-20
+enum class DataManagerRequestType {
+    EDGE_LIST,
+    NODE_FEATURE,
+    NUM_TYPES
 };
 
-enum class SSDRequestType {
-  READ,
-  WRITE
+struct DataManagerRequest {
+    DataManagerRequestType type;
+    uint32_t vid;
+    std::function<void(void)> callback;
 };
 
-struct SSDRequest {
-  SSDRequestType type;
-  std::vector<FlashAddress> addrs;
-  uint32_t bytes;
-  bool finished;
-  std::function<void(void)> callback;
-
-  uint32_t thread_id;
-  uint64_t issued_cycle;
-};
-
-static inline void mqsim_read_flash(SSDRequest* req) {
+static inline void send_data_manager_request(DataManagerRequest* req) {
   COMPILER_BARRIER();
-  __asm__ __volatile__("clflush %0" : "+m" (*(volatile SSDRequest*)req));
+  __asm__ __volatile__("clflush %0" : "+m" (*(volatile DataManagerRequest*)req));
   COMPILER_BARRIER();
 }
 

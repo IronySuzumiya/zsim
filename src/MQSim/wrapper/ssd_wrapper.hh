@@ -38,19 +38,20 @@ struct FlashAddress {
 };
 
 enum class SSDRequestType {
+  READ_LOCAL,
   READ,
-  WRITE
+  WRITE_LOCAL,
+  WRITE,
+  PULL,
+  PUSH,
+  NUM_TYPE
 };
 
 struct SSDRequest {
   SSDRequestType type;
   std::vector<FlashAddress> addrs;
   uint32_t bytes;
-  bool finished;
   std::function<void(void)> callback;
-
-  uint32_t thread_id;
-  uint64_t issued_cycle;
 };
 
 class SSDWrapper : public Module {
@@ -63,7 +64,7 @@ public:
 
   bool check_addr(const FlashAddress& addr) const;
 
-  virtual void send_req(SSDRequest* req) = 0;
+  virtual void send_req(const SSDRequest& req) = 0;
 
   virtual uint32_t get_num_channels() const = 0;
   virtual uint32_t get_num_chips_per_channel() const = 0;
@@ -125,14 +126,16 @@ private:
   void channel_busy_callback(uint32_t chanid);
   void channel_idle_callback(uint32_t chanid);
 
-  void req_callback(SSDRequest* req);
-  void handle_req(SSDRequest* req, bool local = false);
+  //void handle_req_flash_callback(SSDRequest* req);
+  void handle_req_flash(const SSDRequest& req);
+  void handle_req_channel(const SSDRequest& req);
+  void handle_req(const SSDRequest& req);
 
 public:
   MQSimWrapper(const GraphUtil::Graph* graph);
   ~MQSimWrapper() { /*delete _exec_params;*/ delete _ssd; delete _host; }
 
-  void send_req(SSDRequest* req) override;
+  void send_req(const SSDRequest& req) override;
 
   void tick() override;
 

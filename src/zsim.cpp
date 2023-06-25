@@ -66,6 +66,7 @@
 // nfp 2023-6-7
 GraphUtil::Graph* graph;
 FlashGNN::Memory::MQSimWrapper* ssd;
+FlashGNN::DataManager* data_manager;
 uint64_t event_firetime;
 bool in_roi;
 
@@ -151,7 +152,7 @@ VOID SimEnd();
 
 VOID HandleMagicOp(THREADID tid, ADDRINT op);
 
-VOID SendSSDRequest(THREADID tid, ADDRINT op);
+VOID SendDataManagerRequest(THREADID tid, ADDRINT op);
 
 VOID FakeCPUIDPre(THREADID tid, REG eax, REG ecx);
 VOID FakeCPUIDPost(THREADID tid, ADDRINT* eax, ADDRINT* ebx, ADDRINT* ecx, ADDRINT* edx); //REG* eax, REG* ebx, REG* ecx, REG* edx);
@@ -610,7 +611,7 @@ VOID Instruction(INS ins) {
 
     // nfp 2023-6-2
     if (INS_Opcode(ins) == XED_ICLASS_CLFLUSH){
-        INS_InsertCall(ins, IPOINT_BEFORE, (AFUNPTR) SendSSDRequest, IARG_THREAD_ID, IARG_MEMORYREAD_EA, IARG_END);
+        INS_InsertCall(ins, IPOINT_BEFORE, (AFUNPTR) SendDataManagerRequest, IARG_THREAD_ID, IARG_MEMORYREAD_EA, IARG_END);
         INS_Delete(ins);
     }
 
@@ -1234,37 +1235,41 @@ VOID HandleMagicOp(THREADID tid, ADDRINT op) {
 }
 
 // nfp 2023-6-2
-VOID SendSSDRequest(THREADID tid, ADDRINT op) {
-    FlashGNN::Memory::SSDRequest* req = (FlashGNN::Memory::SSDRequest*)op;
-    req->thread_id = tid;
-    req->issued_cycle = zinfo->globPhaseCycles / zinfo->freqMHz * 1000;
+VOID SendDataManagerRequest(THREADID tid, ADDRINT op) {
+    FlashGNN::DataManagerRequest* req = (FlashGNN::DataManagerRequest*)op;
+    uint64_t cur_ssd_cycle = zinfo->globPhaseCycles / zinfo->freqMHz * 1000;
 
     std::cout << "type: " << static_cast<uint32_t>(req->type) << std::endl;
-    for(const auto& addr : req->addrs) {
-        std::cout << "addr: " << addr << std::endl;
-    }
-    std::cout << "bytes: " << req->bytes << std::endl;
-    std::cout << "thread_id: " << req->thread_id << std::endl;
-    std::cout << "issued_cycle: " << req->issued_cycle << std::endl;
+    std::cout << "vid: " << req->vid << std::endl;
+    std::cout << "issued_cycle: " << cur_ssd_cycle << std::endl;
 
-    while(ssd->get_next_event_firetime() < req->issued_cycle) {
-        std::cout << "skip to next event: " << ssd->get_next_event_firetime() << std::endl;
-        ssd->skip_to_next_event();
+    while(data_manager->get_next_event_firetime() < cur_ssd_cycle) {
+        std::cout << "skip to next event: " << data_manager->get_next_event_firetime() << std::endl;
+        data_manager->skip_to_next_event();
     }
-    if(ssd->get_cycle() < req->issued_cycle) {
-        std::cout << "set ssd cycle to " << req->issued_cycle - 1 << std::endl;
-        ssd->set_cycle(req->issued_cycle - 1);
-        ssd->tick();
+    if(data_manager->get_cycle() < cur_ssd_cycle) {
+        std::cout << "set ssd cycle to " << cur_ssd_cycle - 1 << std::endl;
+        data_manager->set_cycle(cur_ssd_cycle - 1);
+        data_manager->tick();
         std::cout << "ssd ticks, now ssd cycle: " << ssd->get_cycle() << std::endl;
     } else {
-        std::cerr << "fatal error: request issued cycle (" << req->issued_cycle << ") < current ssd cycle (" << ssd->get_cycle() << ")" << std::endl;
+        std::cerr << "fatal error: request issued cycle (" << cur_ssd_cycle << ") <= current ssd cycle (" << data_manager->get_cycle() << ")" << std::endl;
     }
 
-    ssd->send_req(req);
+    switch(req->type) {
+        case FlashGNN::DataManagerRequestType::EDGE_LIST:
+            data_manager->load_edge_list_to_dram(req->vid, req->callback);
+            break;
+        case FlashGNN::DataManagerRequestType::NODE_FEATURE:
+            data_manager->load_node_feature_to_dram({false, 0, 0, req->vid}, req->callback);
+            break;
+        default:
+            assert(false);
+    }
 
-    if(!ssd->is_event_tree_empty()) {
-        if(ssd->get_next_event_firetime() > event_firetime) {
-            event_firetime = ssd->get_next_event_firetime();
+    if(data_manager->busy()) {
+        if(data_manager->get_next_event_firetime() > event_firetime && data_manager->get_next_event_firetime() < UINT64_MAX) {
+            event_firetime = data_manager->get_next_event_firetime();
             std::cout << "next event firetime: " << event_firetime << std::endl;
         }
     }
@@ -1500,6 +1505,7 @@ int main(int argc, char *argv[]) {
     graph = new GraphUtil::Graph();
     graph->import("/home/nfp/FlashGNN/data/glist_n64k_d16k_products", 16384);
     ssd = new FlashGNN::Memory::MQSimWrapper(graph);
+    data_manager = new FlashGNN::DataManager(ssd, graph, 256, 16777216);
 
     std::cout << "graph and mqsim initialized" << std::endl;
 
@@ -1642,6 +1648,7 @@ int main(int argc, char *argv[]) {
         PIN_StartProgram();
     }
 
+    delete data_manager;
     delete ssd;
     delete graph;
 

@@ -16,7 +16,7 @@ enum class DataManagerRequestType {
 
 struct DataManagerRequest {
     DataManagerRequestType type;
-    uint32_t vid;
+    uint32_t val;
     std::function<void(void)> callback;
 };
 
@@ -303,7 +303,7 @@ public:
     ssd->tick();
   }
 
-  bool load_edge_list_to_dram(GraphUtil::vid_t vid, std::function<void(void)> callback);
+  bool load_edge_list_to_dram(GraphUtil::bid_t bid, std::function<void(void)> callback);
 
   bool load_node_feature_to_dram(const NodeFeature& in, std::function<void(void)> callback);
 

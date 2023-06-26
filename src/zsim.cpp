@@ -1240,7 +1240,7 @@ VOID SendDataManagerRequest(THREADID tid, ADDRINT op) {
     uint64_t cur_ssd_cycle = zinfo->globPhaseCycles / zinfo->freqMHz * 1000;
 
     std::cout << "type: " << static_cast<uint32_t>(req->type) << std::endl;
-    std::cout << "vid: " << req->vid << std::endl;
+    std::cout << "val: " << req->val << std::endl;
     std::cout << "issued_cycle: " << cur_ssd_cycle << std::endl;
 
     while(data_manager->get_next_event_firetime() < cur_ssd_cycle) {
@@ -1258,10 +1258,10 @@ VOID SendDataManagerRequest(THREADID tid, ADDRINT op) {
 
     switch(req->type) {
         case FlashGNN::DataManagerRequestType::EDGE_LIST:
-            data_manager->load_edge_list_to_dram(req->vid, req->callback);
+            data_manager->load_edge_list_to_dram(req->val, req->callback);
             break;
         case FlashGNN::DataManagerRequestType::NODE_FEATURE:
-            data_manager->load_node_feature_to_dram({false, 0, 0, req->vid}, req->callback);
+            data_manager->load_node_feature_to_dram({false, 0, 0, req->val}, req->callback);
             break;
         default:
             assert(false);

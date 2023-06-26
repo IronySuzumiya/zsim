@@ -25,7 +25,7 @@ int main(int argc, char* argv[]) {
 
   DataManagerRequest edge_list_req {
     .type = DataManagerRequestType::EDGE_LIST,
-    .vid = 233,
+    .val = 233,
     .callback = []() {
       edge_list_req_finished = true;
       printf("node 233 edge list loaded\n");
@@ -35,7 +35,7 @@ int main(int argc, char* argv[]) {
   usleep(1);
   DataManagerRequest node_feature_req {
     .type = DataManagerRequestType::NODE_FEATURE,
-    .vid = 2333,
+    .val = 2333,
     .callback = []() {
       node_feature_req_finished = true;
       printf("node 2333 input feature loaded\n");

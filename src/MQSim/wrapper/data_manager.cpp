@@ -129,18 +129,8 @@ bool DataManager::edge_list_from_flash_to_dram(GraphUtil::bid_t bid, std::functi
   return edge_list_from_flash_to_page_reg(bid, std::bind(&DataManager::edge_list_from_page_reg_to_dram, this, bid, callback, false));
 }
 
-bool DataManager::load_edge_list_to_dram(GraphUtil::vid_t vid, std::function<void(void)> callback) {
-  if(graph->is_dvert(vid)) {
-    auto&& dm = graph->get_dvert_metadata(vid);
-    for(GraphUtil::bid_t bid = dm.blo; bid < dm.blo + dm.nblocks - 1; ++bid) {
-      edge_list_from_flash_to_dram(bid, [](){});
-    }
-    return edge_list_from_flash_to_dram(dm.blo + dm.nblocks - 1, callback);
-  } else {
-    GraphUtil::bid_t bid = graph->binary_search_block(vid);
-    assert(bid < graph->get_global_metadata().nblocks);
-    return edge_list_from_flash_to_dram(bid, callback);
-  }
+bool DataManager::load_edge_list_to_dram(GraphUtil::bid_t bid, std::function<void(void)> callback) {
+  return edge_list_from_flash_to_dram(bid, callback);
 }
 
 void DataManager::node_feature_from_flash_to_page_reg_callback(uint32_t chipid, const DataChunkTag& data_chunk_tag) {

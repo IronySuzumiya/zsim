@@ -59,7 +59,7 @@ enum class DataManagerRequestType {
 
 struct DataManagerRequest {
     DataManagerRequestType type;
-    uint32_t vid;
+    uint32_t val;
     std::function<void(void)> callback;
 };
 

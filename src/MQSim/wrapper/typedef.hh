@@ -28,13 +28,12 @@ void delete_subgraph_exclude_root_node(Node* node);
 struct NodeFeature {
   bool grad;
   uint32_t layer;
-  uint64_t tag;
   GraphUtil::vid_t vid;
   bool is_partial;
   std::vector<NodeFeature> components;
 
   inline bool is_input_node_feature() const {
-    return !grad && layer == 0 && tag == 0 && !is_partial;
+    return !grad && layer == 0 && !is_partial;
   }
 
   inline bool is_partial_node_feature() const {
@@ -52,11 +51,10 @@ struct HashNodeFeature {
   inline std::size_t operator()(const NodeFeature& in) const {
     auto hash1 = std::hash<bool>{}(in.grad);
     auto hash2 = std::hash<uint32_t>{}(in.layer);
-    auto hash3 = std::hash<uint64_t>{}(in.tag);
-    auto hash4 = std::hash<GraphUtil::vid_t>{}(in.vid);
-    auto hash5 = std::hash<bool>{}(in.is_partial);
-    auto hash6 = std::hash<size_t>{}(in.components.size());
-    return hash1 ^ hash2 ^ hash3 ^ hash4 ^ hash5 ^ hash6;
+    auto hash3 = std::hash<GraphUtil::vid_t>{}(in.vid);
+    auto hash4 = std::hash<bool>{}(in.is_partial);
+    auto hash5 = std::hash<size_t>{}(in.components.size());
+    return hash1 ^ hash2 ^ hash3 ^ hash4 ^ hash5;
   }
 };
 

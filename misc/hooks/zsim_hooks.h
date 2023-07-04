@@ -51,21 +51,23 @@ static inline void zsim_work_begin() { zsim_magic_op(ZSIM_MAGIC_OP_WORK_BEGIN); 
 static inline void zsim_work_end() { zsim_magic_op(ZSIM_MAGIC_OP_WORK_END); }
 
 // nfp 2023-6-20
-enum class DataManagerRequestType {
-    EDGE_LIST,
-    NODE_FEATURE,
+enum class FlashGNNCallType {
+    LOAD_EDGE_LIST,
+    LOAD_NODE_FEATURE,
+    AGGREGATE,
+    COMBINE,
     NUM_TYPES
 };
 
-struct DataManagerRequest {
-    DataManagerRequestType type;
+struct FlashGNNCall {
+    FlashGNNCallType type;
     uint32_t val;
     std::function<void(void)> callback;
 };
 
-static inline void send_data_manager_request(DataManagerRequest* req) {
+static inline void send_data_manager_request(FlashGNNCall* call) {
   COMPILER_BARRIER();
-  __asm__ __volatile__("clflush %0" : "+m" (*(volatile DataManagerRequest*)req));
+  __asm__ __volatile__("clflush %0" : "+m" (*(volatile FlashGNNCall*)call));
   COMPILER_BARRIER();
 }
 

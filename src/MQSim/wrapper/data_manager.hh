@@ -8,18 +8,6 @@
 
 namespace FlashGNN {
 
-enum class DataManagerRequestType {
-    EDGE_LIST,
-    NODE_FEATURE,
-    NUM_TYPES
-};
-
-struct DataManagerRequest {
-    DataManagerRequestType type;
-    uint32_t val;
-    std::function<void(void)> callback;
-};
-
 class DataManager {
 public:
   struct PendingReqEntry {
@@ -74,6 +62,7 @@ public:
   struct NodeFeatureTranslationLayer {
     const Memory::SSDWrapper* ssd;
     const GraphUtil::Graph* graph;
+    uint32_t node_feature_dim;
     uint32_t node_feature_size;
     uint32_t nodes_per_page;
     uint32_t pages_per_node;
@@ -148,7 +137,7 @@ public:
     }
 
     NodeFeatureTranslationLayer(const Memory::SSDWrapper* ssd, const GraphUtil::Graph* graph, uint32_t node_feature_dim)
-      : ssd(ssd), graph(graph), node_feature_size(sizeof(uint32_t) * node_feature_dim),
+      : ssd(ssd), graph(graph), node_feature_dim(node_feature_dim), node_feature_size(sizeof(uint32_t) * node_feature_dim),
         nodes_per_page(ssd->get_page_capacity() * ssd->get_num_planes_per_die() / node_feature_size),
         pages_per_node((node_feature_size - 1) / (ssd->get_page_capacity() * ssd->get_num_planes_per_die()) + 1),
         nvgroups(nodes_per_page > 1 ? (graph->get_global_metadata().nverts - 1) / nodes_per_page + 1 : graph->get_global_metadata().nverts),
@@ -174,26 +163,14 @@ private:
   uint32_t buffer_capacity;
   uint32_t buffer_used;
 
+  std::map<uint64_t, std::function<void(void)>> aggregations;
+  std::vector<std::map<uint64_t, std::function<void(void)>>> combinations;
+  
+  uint32_t aggregator_latency;
+  uint32_t pe_latency;
+  uint32_t combine_latency;
+
   std::default_random_engine rand_eng;
-
-  struct Stats {
-    struct GSTLStats {
-      uint64_t bytes_loaded;
-    } gstl_stats;
-
-    struct NFTLStats {
-      struct InputFeatureStats {
-        uint32_t req_entry_hits;
-        uint32_t page_reg_hits;
-        uint32_t page_reg_misses;
-
-        uint64_t bytes_loaded_from_flash;
-        uint64_t bytes_transmitted_via_channel_bus;
-      } input_feature_stats;
-    } nftl_stats;
-
-    uint64_t cycle;
-  } stats_so_far;
 
   void edge_list_from_flash_to_page_reg_callback(uint32_t chipid, const DataChunkTag& data_chunk_tag);
   bool edge_list_from_flash_to_page_reg(GraphUtil::bid_t bid, std::function<void(void)> callback, bool re_enter = false);
@@ -218,11 +195,16 @@ private:
   void show_epoch_io_stats();
 
 public:
-  DataManager(Memory::SSDWrapper* ssd, const GraphUtil::Graph* graph, uint32_t node_feature_dim, uint32_t buffer_capacity)
+  DataManager(Memory::SSDWrapper* ssd, const GraphUtil::Graph* graph,
+    uint32_t node_feature_dim, uint32_t buffer_capacity,
+    uint32_t aggregator_latency, uint32_t pe_latency)
     : ssd(ssd), graph(graph), gstl(ssd, graph), nftl(ssd, graph, node_feature_dim),
       pending_flash_read_reqs(ssd->get_num_chips_per_channel() * ssd->get_num_channels()),
       active_flash_read_reqs(ssd->get_num_chips_per_channel() * ssd->get_num_channels()),
-      buffer_capacity(buffer_capacity), buffer_used(0), rand_eng(2333), stats_so_far({{0}, {{0}}, 0}) {}
+      buffer_capacity(buffer_capacity), buffer_used(0),
+      combinations(2), aggregator_latency(aggregator_latency), pe_latency(pe_latency),
+      combine_latency(pe_latency * 128 * 2 * ((node_feature_dim - 1) / 128 + 1) * ((node_feature_dim - 1) / 128 + 1)),
+      rand_eng(2333) {}
   ~DataManager() {}
 
   inline uint64_t get_cycle() const {
@@ -290,7 +272,16 @@ public:
   }
 
   inline uint64_t get_next_event_firetime() const {
-    return ssd->get_next_event_firetime();
+    uint64_t firetime = ssd->get_next_event_firetime();
+    if(!aggregations.empty() && aggregations.begin()->first < firetime) {
+      firetime = aggregations.begin()->first;
+    }
+    for(auto& combiner : combinations) {
+      if(!combiner.empty() && combiner.begin()->first < firetime) {
+        firetime = combiner.begin()->first;
+      }
+    }
+    return firetime;
   }
 
   inline void skip_to_next_event() {
@@ -301,11 +292,48 @@ public:
 
   inline void tick() {
     ssd->tick();
+    while(!aggregations.empty() && get_cycle() >= aggregations.begin()->first) {
+      aggregations.begin()->second();
+      aggregations.erase(aggregations.begin());
+    }
+    for(auto& combiner : combinations) {
+      while(!combiner.empty() && get_cycle() >= combiner.begin()->first) {
+        combiner.begin()->second();
+        combiner.erase(combiner.begin());
+      }
+    }
   }
 
   bool load_edge_list_to_dram(GraphUtil::bid_t bid, std::function<void(void)> callback);
 
   bool load_node_feature_to_dram(const NodeFeature& in, std::function<void(void)> callback);
+
+  inline void aggregate(std::function<void(void)> callback) {
+    if(aggregations.empty()) {
+      aggregations.insert(std::make_pair(get_cycle() + aggregator_latency, callback));
+    } else {
+      aggregations.insert(std::make_pair(aggregations.rbegin()->first + aggregator_latency, callback));
+    }
+  }
+
+  inline void combine(std::function<void(void)> callback) {    
+    uint64_t finish_cycle = UINT64_MAX;
+    uint32_t combiner_idx = 0;
+    for(uint32_t i = 0; i < combinations.size(); ++i) {
+      if(combinations.at(i).empty() || combinations.at(i).rbegin()->first < get_cycle() + combine_latency) {
+        combiner_idx = i;
+        finish_cycle = get_cycle() + combine_latency;
+        break;
+      } else {
+        uint64_t tmp_finish_cycle = combinations.at(i).rbegin()->first + pe_latency;
+        if(tmp_finish_cycle < finish_cycle) {
+          combiner_idx = i;
+          finish_cycle = tmp_finish_cycle;
+        }
+      }
+    }
+    combinations.at(combiner_idx).insert(std::make_pair(finish_cycle, callback));
+  }
 
   void flush_pending_flash_read_reqs(uint32_t chipid);
   void flush_pending_channel_bus_transmission_reqs();

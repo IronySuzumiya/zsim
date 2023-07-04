@@ -41,7 +41,7 @@ void delete_subgraph_exclude_root_node(Node* node) {
 }
 
 bool NodeFeature::operator==(const NodeFeature& other) const {
-  if(grad == other.grad && layer == other.layer && tag == other.tag && vid == other.vid && is_partial == other.is_partial) {
+  if(grad == other.grad && layer == other.layer && vid == other.vid && is_partial == other.is_partial) {
     if(!is_partial) {
       return true;
     } else {

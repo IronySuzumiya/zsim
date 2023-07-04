@@ -63,6 +63,21 @@
 
 //#include <signal.h> //can't include this, conflicts with PIN's
 
+// nfp 2023-7-3
+enum class FlashGNNCallType {
+    LOAD_EDGE_LIST,
+    LOAD_NODE_FEATURE,
+    AGGREGATE,
+    COMBINE,
+    NUM_TYPES
+};
+
+struct FlashGNNCall {
+    FlashGNNCallType type;
+    uint32_t val;
+    std::function<void(void)> callback;
+};
+
 // nfp 2023-6-7
 GraphUtil::Graph* graph;
 FlashGNN::Memory::MQSimWrapper* ssd;
@@ -152,7 +167,7 @@ VOID SimEnd();
 
 VOID HandleMagicOp(THREADID tid, ADDRINT op);
 
-VOID SendDataManagerRequest(THREADID tid, ADDRINT op);
+VOID HandleFlashGNNCall(THREADID tid, ADDRINT op);
 
 VOID FakeCPUIDPre(THREADID tid, REG eax, REG ecx);
 VOID FakeCPUIDPost(THREADID tid, ADDRINT* eax, ADDRINT* ebx, ADDRINT* ecx, ADDRINT* edx); //REG* eax, REG* ebx, REG* ecx, REG* edx);
@@ -611,7 +626,7 @@ VOID Instruction(INS ins) {
 
     // nfp 2023-6-2
     if (INS_Opcode(ins) == XED_ICLASS_CLFLUSH){
-        INS_InsertCall(ins, IPOINT_BEFORE, (AFUNPTR) SendDataManagerRequest, IARG_THREAD_ID, IARG_MEMORYREAD_EA, IARG_END);
+        INS_InsertCall(ins, IPOINT_BEFORE, (AFUNPTR) HandleFlashGNNCall, IARG_THREAD_ID, IARG_MEMORYREAD_EA, IARG_END);
         INS_Delete(ins);
     }
 
@@ -1235,12 +1250,12 @@ VOID HandleMagicOp(THREADID tid, ADDRINT op) {
 }
 
 // nfp 2023-6-2
-VOID SendDataManagerRequest(THREADID tid, ADDRINT op) {
-    FlashGNN::DataManagerRequest* req = (FlashGNN::DataManagerRequest*)op;
+VOID HandleFlashGNNCall(THREADID tid, ADDRINT op) {
+    FlashGNNCall* call = (FlashGNNCall*)op;
     uint64_t cur_ssd_cycle = zinfo->globPhaseCycles / zinfo->freqMHz * 1000;
 
-    std::cout << "type: " << static_cast<uint32_t>(req->type) << std::endl;
-    std::cout << "val: " << req->val << std::endl;
+    std::cout << "type: " << static_cast<uint32_t>(call->type) << std::endl;
+    std::cout << "val: " << call->val << std::endl;
     std::cout << "issued_cycle: " << cur_ssd_cycle << std::endl;
 
     while(data_manager->get_next_event_firetime() < cur_ssd_cycle) {
@@ -1252,16 +1267,24 @@ VOID SendDataManagerRequest(THREADID tid, ADDRINT op) {
         data_manager->set_cycle(cur_ssd_cycle - 1);
         data_manager->tick();
         std::cout << "ssd ticks, now ssd cycle: " << ssd->get_cycle() << std::endl;
+    } else if(data_manager->get_cycle() == cur_ssd_cycle) {
+
     } else {
-        std::cerr << "fatal error: request issued cycle (" << cur_ssd_cycle << ") <= current ssd cycle (" << data_manager->get_cycle() << ")" << std::endl;
+        std::cerr << "fatal error: request issued cycle (" << cur_ssd_cycle << ") < current ssd cycle (" << data_manager->get_cycle() << ")" << std::endl;
     }
 
-    switch(req->type) {
-        case FlashGNN::DataManagerRequestType::EDGE_LIST:
-            data_manager->load_edge_list_to_dram(req->val, req->callback);
+    switch(call->type) {
+        case FlashGNNCallType::LOAD_EDGE_LIST:
+            data_manager->load_edge_list_to_dram(call->val, call->callback);
             break;
-        case FlashGNN::DataManagerRequestType::NODE_FEATURE:
-            data_manager->load_node_feature_to_dram({false, 0, 0, req->val}, req->callback);
+        case FlashGNNCallType::LOAD_NODE_FEATURE:
+            data_manager->load_node_feature_to_dram({false, 0, call->val}, call->callback);
+            break;
+        case FlashGNNCallType::AGGREGATE:
+            data_manager->aggregate(call->callback);
+            break;
+        case FlashGNNCallType::COMBINE:
+            data_manager->combine(call->callback);
             break;
         default:
             assert(false);
@@ -1505,7 +1528,7 @@ int main(int argc, char *argv[]) {
     graph = new GraphUtil::Graph();
     graph->import("/home/nfp/FlashGNN/data/glist_n64k_d16k_products", 16384);
     ssd = new FlashGNN::Memory::MQSimWrapper(graph);
-    data_manager = new FlashGNN::DataManager(ssd, graph, 256, 16777216);
+    data_manager = new FlashGNN::DataManager(ssd, graph, 256, 16777216, 8, 6);
 
     std::cout << "graph and mqsim initialized" << std::endl;
 

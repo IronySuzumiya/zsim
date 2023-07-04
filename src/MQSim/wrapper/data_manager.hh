@@ -190,10 +190,6 @@ private:
 
   bool node_feature_from_flash_to_dram(const NodeFeature& in, std::function<void(void)> callback);
 
-  void show_epoch_gstl_stats();
-  void show_epoch_nftl_stats();
-  void show_epoch_io_stats();
-
 public:
   DataManager(Memory::SSDWrapper* ssd, const GraphUtil::Graph* graph,
     uint32_t node_feature_dim, uint32_t buffer_capacity,
@@ -241,20 +237,6 @@ public:
 
   inline bool busy() const {
     return ssd->busy() || !pending_reqs_empty() || !active_reqs_empty();
-  }
-
-  inline vgroupid_t vid_to_vgroupid(GraphUtil::vid_t vid) const {
-    return nftl.vid2vgroupid(vid);
-  }
-
-  inline uint32_t vid_to_chipid(GraphUtil::vid_t vid) const {
-    vgroupid_t vgroupid = nftl.vid2vgroupid(vid);
-    
-    auto&& addrs = nftl.vgroupid2flashaddr(vgroupid);
-    uint32_t chipid = addrs.front().chip * ssd->get_num_channels() + addrs.front().channel;
-    assert(chipid == (vgroupid % (ssd->get_num_chips_per_channel() * ssd->get_num_channels())));
-    
-    return chipid;
   }
 
   inline bool node_feature_in_page_reg(const NodeFeature& in) const {

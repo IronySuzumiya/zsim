@@ -65,7 +65,7 @@ struct FlashGNNCall {
     std::function<void(void)> callback;
 };
 
-static inline void send_data_manager_request(FlashGNNCall* call) {
+static inline void flashgnn_call(FlashGNNCall* call) {
   COMPILER_BARRIER();
   __asm__ __volatile__("clflush %0" : "+m" (*(volatile FlashGNNCall*)call));
   COMPILER_BARRIER();

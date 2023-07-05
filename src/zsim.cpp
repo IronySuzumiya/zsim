@@ -1258,7 +1258,7 @@ VOID HandleFlashGNNCall(THREADID tid, ADDRINT op) {
     std::cout << "val: " << call->val << std::endl;
     std::cout << "issued_cycle: " << cur_ssd_cycle << std::endl;
 
-    while(data_manager->get_next_event_firetime() < cur_ssd_cycle) {
+    /*while(data_manager->get_next_event_firetime() < cur_ssd_cycle) {
         std::cout << "skip to next event: " << data_manager->get_next_event_firetime() << std::endl;
         data_manager->skip_to_next_event();
     }
@@ -1271,7 +1271,7 @@ VOID HandleFlashGNNCall(THREADID tid, ADDRINT op) {
 
     } else {
         std::cerr << "fatal error: request issued cycle (" << cur_ssd_cycle << ") < current ssd cycle (" << data_manager->get_cycle() << ")" << std::endl;
-    }
+    }*/
 
     switch(call->type) {
         case FlashGNNCallType::LOAD_EDGE_LIST:
@@ -1290,12 +1290,12 @@ VOID HandleFlashGNNCall(THREADID tid, ADDRINT op) {
             assert(false);
     }
 
-    if(data_manager->busy()) {
+    /*if(data_manager->busy()) {
         if(data_manager->get_next_event_firetime() > event_firetime && data_manager->get_next_event_firetime() < UINT64_MAX) {
             event_firetime = data_manager->get_next_event_firetime();
             std::cout << "next event firetime: " << event_firetime << std::endl;
         }
-    }
+    }*/
 }
 
 //CPUIID faking

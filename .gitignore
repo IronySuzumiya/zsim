@@ -2,3 +2,4 @@
 build/
 tests/bin
 tests/build
+.sconsign.dblite
